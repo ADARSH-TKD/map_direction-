@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Finder - Free</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        #particles-js {
+            width: 100%;
+            height: 100%;             
+            position: relative;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: calc(100% - 40px);
+            max-width: 1200px;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+
+        .input-section {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .input-group {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 600;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            padding: 12px 30px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+            align-self: flex-end;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        #map {
+            width: 100%;
+            height: 500px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border: 2px solid #eee;
+        }
+
+        #directions-panel {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            max-height: 400px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        #directions-panel h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+
+        .direction-step {
+            padding: 10px;
+            margin-bottom: 10px;
+            background: white;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+        }
+
+        .alert {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+    </style>
+</head>
+<body>
+    <div id = "particles-js"></div>
+    <div class="container">
+        <h1>📍 Find Your Route</h1>
+        
+
+        
+        <div class="input-section">
+            <div class="input-group">
+                <label for="pickup">Pickup Location</label>
+                <input type="text" id="pickup" placeholder="e.g., Mumbai, India" value="Mumbai">
+            </div>
+            
+            <div class="input-group">
+                <label for="destination">Destination</label>
+                <input type="text" id="destination" placeholder="e.g., Delhi, India" value="Delhi">
+            </div>
+            
+            <button id="getDirections">Get Directions</button>
+        </div>
+
+        <div id="map"></div>
+        
+        <div id="directions-panel"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script src="particles.js"></script>
+    <script src="app.js"></script>
+    <script>
+        let map;
+        let routeLayer;
+        let markers = [];
+
+        // Initialize map
+        function initMap() {
+            map = L.map('map').setView([20.5937, 78.9629], 5);
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+            
+            console.log('Map initialized successfully! ✅');
+        }
+
+        // Get coordinates
+        async function getCoordinates(location) {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            if (data.length > 0) {
+                return {
+                    lat: parseFloat(data[0].lat),
+                    lon: parseFloat(data[0].lon),
+                    display_name: data[0].display_name
+                };
+            }
+            return null;
+        }
+
+        // Get route
+        async function getRoute(start, end) {
+            const url = `https://router.project-osrm.org/route/v1/driving/${start.lon},${start.lat};${end.lon},${end.lat}?overview=full&geometries=geojson&steps=true`;
+            const response = await fetch(url);
+            return await response.json();
+        }
+
+        // Calculate route
+        async function calculateRoute() {
+            const pickup = document.getElementById('pickup').value.trim();
+            const destination = document.getElementById('destination').value.trim();
+            
+            if (!pickup || !destination) {
+                alert('⚠️ Please enter both locations!');
+                return;
+            }
+            
+            const button = document.getElementById('getDirections');
+            button.textContent = '⏳ Loading...';
+            button.disabled = true;
+            
+            try {
+                // Get coordinates
+                console.log('Finding locations...');
+                const startCoords = await getCoordinates(pickup);
+                const endCoords = await getCoordinates(destination);
+                
+                if (!startCoords || !endCoords) {
+                    alert('❌ Could not find one or both locations! Try being more specific (e.g., "Mumbai, Maharashtra, India")');
+                    button.textContent = 'Get Directions';
+                    button.disabled = false;
+                    return;
+                }
+                
+                console.log('Calculating route...');
+                const routeData = await getRoute(startCoords, endCoords);
+                
+                if (routeData.code !== 'Ok') {
+                    alert('❌ Could not calculate route between these locations!');
+                    button.textContent = 'Get Directions';
+                    button.disabled = false;
+                    return;
+                }
+                
+                // Clear previous route and markers
+                if (routeLayer) map.removeLayer(routeLayer);
+                markers.forEach(marker => map.removeLayer(marker));
+                markers = [];
+                
+                // Draw route
+                const coordinates = routeData.routes[0].geometry.coordinates.map(coord => [coord[1], coord[0]]);
+                routeLayer = L.polyline(coordinates, {
+                    color: '#667eea',
+                    weight: 6,
+                    opacity: 0.8
+                }).addTo(map);
+                
+                // Add markers
+                const startMarker = L.marker([startCoords.lat, startCoords.lon])
+                    .addTo(map)
+                    .bindPopup(`<b>🚩 Start</b><br>${startCoords.display_name}`)
+                    .openPopup();
+                
+                const endMarker = L.marker([endCoords.lat, endCoords.lon])
+                    .addTo(map)
+                    .bindPopup(`<b>🏁 End</b><br>${endCoords.display_name}`);
+                
+                markers.push(startMarker, endMarker);
+                
+                // Fit map to route
+                map.fitBounds(routeLayer.getBounds(), { padding: [50, 50] });
+                
+                // Display directions
+                displayDirections(routeData.routes[0], pickup, destination);
+                
+                button.textContent = 'Get Directions';
+                button.disabled = false;
+                
+                console.log('✅ Route calculated successfully!');
+                
+            } catch (error) {
+                console.error('Error:', error);
+                alert('❌ An error occurred: ' + error.message);
+                button.textContent = 'Get Directions';
+                button.disabled = false;
+            }
+        }
+
+        // Display directions
+        function displayDirections(route, start, end) {
+            const panel = document.getElementById('directions-panel');
+            const distanceKm = (route.distance / 1000).toFixed(1);
+            const durationMin = Math.round(route.duration / 60);
+            const hours = Math.floor(durationMin / 60);
+            const mins = durationMin % 60;
+            const durationText = hours > 0 ? `${hours}h ${mins}min` : `${mins} min`;
+            
+            let html = '<h3>📋 Route Details</h3>';
+            html += `<p><strong>📏 Total Distance:</strong> ${distanceKm} km</p>`;
+            html += `<p><strong>⏱️ Estimated Time:</strong> ${durationText}</p>`;
+            html += `<p><strong>🚗 From:</strong> ${start}</p>`;
+            html += `<p><strong>🏁 To:</strong> ${end}</p>`;
+            html += '<hr style="margin: 15px 0; border: 1px solid #ddd;">';
+            html += '<h4>Turn-by-Turn Directions:</h4>';
+            
+            route.legs[0].steps.forEach((step, index) => {
+                const dist = step.distance >= 1000 ? 
+                    (step.distance / 1000).toFixed(1) + ' km' : 
+                    step.distance + ' m';
+                const dur = Math.round(step.duration / 60);
+                
+                html += `<div class="direction-step">
+                    <strong>Step ${index + 1}:</strong> ${step.maneuver.instruction || 'Continue straight'}
+                    <br><small>📍 ${dist} - ⏱️ ${dur} min</small>
+                </div>`;
+            });
+            
+            panel.innerHTML = html;
+            panel.style.display = 'block';
+        }
+
+        // Initialize on load
+        window.addEventListener('load', initMap);
+        
+        // Event listeners
+        document.getElementById('getDirections').addEventListener('click', calculateRoute);
+        
+        document.getElementById('pickup').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') calculateRoute();
+        });
+        
+        document.getElementById('destination').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') calculateRoute();
+        });
+    </script>
+</body>
+</html>
